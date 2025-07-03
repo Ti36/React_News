@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: sans-serif; }
+        .modal { display: none; }
+        .modal.active { display: flex; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md sticky top-0 z-10">
+        <nav class="container mx-auto px-6 py-3 flex justify-between items-center">
+            <h1 class="text-xl font-bold text-gray-800">News App</h1>
+            <div>
+                <a href="#" class="px-3 py-2">Home</a>
+                <a href="#" class="px-3 py-2">My Summaries</a>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-4">
+        <!-- Category Tabs -->
+        <div id="category-tabs" class="flex justify-center space-x-4 mb-6 border-b pb-4">
+            <!-- Tabs will be inserted here by JavaScript -->
+        </div>
+
+        <!-- Article List -->
+        <div id="loader" class="text-center p-10">Loading news...</div>
+        <div id="error-message" class="text-center p-10 text-red-500 hidden"></div>
+        <div id="article-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <!-- Articles will be inserted here by JavaScript -->
+        </div>
+    </main>
+
+    <!-- Article Detail Modal -->
+    <div id="detail-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center">
+        <div class="bg-white rounded-lg max-w-2xl w-full m-4 max-h-[90vh] flex flex-col">
+            <div id="detail-modal-content" class="p-6 overflow-y-auto"></div>
+            <div class="p-4 border-t flex justify-end space-x-2">
+                <button id="summarize-button" class="bg-blue-500 text-white px-4 py-2 rounded">Summarise</button>
+                <button onclick="closeDetailModal()" class="bg-gray-300 px-4 py-2 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summarizer Modal -->
+    <div id="summary-modal" class="modal fixed inset-0 bg-black bg-opacity-50 justify-center items-center">
+        <div class="bg-white rounded-lg max-w-2xl w-full m-4">
+            <div class="p-6">
+                <h2 class="text-xl font-bold mb-4">AI Summary</h2>
+                <div id="summary-loader" class="text-center p-4">Generating summary...</div>
+                <div id="summary-error" class="text-red-500 p-4 hidden"></div>
+                <div id="summary-content" class="prose max-w-none"></div>
+                <button onclick="closeSummaryModal()" class="mt-4 w-full bg-gray-300 px-4 py-2 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000';
+        const articleList = document.getElementById('article-list');
+        const loader = document.getElementById('loader');
+        const errorMessage = document.getElementById('error-message');
+        const categoryTabsContainer = document.getElementById('category-tabs');
+        
+        const detailModal = document.getElementById('detail-modal');
+        const detailModalContent = document.getElementById('detail-modal-content');
+        const summarizeButton = document.getElementById('summarize-button');
+
+        const summaryModal = document.getElementById('summary-modal');
+        const summaryLoader = document.getElementById('summary-loader');
+        const summaryError = document.getElementById('summary-error');
+        const summaryContent = document.getElementById('summary-content');
+
+        let currentArticleForSummary = null;
+
+        // --- Core Functions ---
+
+        async function fetchNews(category = 'general') {
+            showLoader();
+            try {
+                const response = await fetch(`${API_URL}/api/news?category=${category}`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                renderArticles(data.articles);
+            } catch (error) {
+                showError('Could not fetch news. Please make sure the server is running.');
+            }
+        }
+
+        async function fetchSummary(article) {
+            summaryLoader.style.display = 'block';
+            summaryError.style.display = 'none';
+            summaryContent.innerHTML = '';
+            
+            const prompt = `Summarize the following article in 3 bullet points:\n\n${article.description}`;
+            
+            try {
+                const response = await fetch(`${API_URL}/api/summarize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error || 'Failed to get summary');
+                }
+                const data = await response.json();
+                summaryContent.innerHTML = data.summary.replace(/\n/g, '<br>');
+            } catch (error) {
+                summaryError.textContent = `Error: ${error.message}`;
+                summaryError.style.display = 'block';
+            } finally {
+                summaryLoader.style.display = 'none';
+            }
+        }
+
+        // --- UI Rendering ---
+
+        function renderArticles(articles) {
+            articleList.innerHTML = '';
+            if (!articles || articles.length === 0) {
+                showError('No articles found for this category.');
+                return;
+            }
+            articles.forEach(article => {
+                const articleCard = document.createElement('div');
+                articleCard.className = 'bg-white rounded-lg shadow-md overflow-hidden cursor-pointer hover:shadow-xl';
+                articleCard.innerHTML = `
+                    <img src="${article.image || 'https://placehold.co/600x400/e2e8f0/e2e8f0?text=News'}" alt="${article.title}" class="w-full h-48 object-cover">
+                    <div class="p-4">
+                        <h3 class="font-bold text-lg">${article.title}</h3>
+                        <p class="text-sm text-gray-600 mt-2">${article.source.name}</p>
+                    </div>
+                `;
+                articleCard.onclick = () => openDetailModal(article);
+                articleList.appendChild(articleCard);
+            });
+        }
+
+        function renderCategoryTabs() {
+            const categories = ['General', 'Business', 'Technology', 'Sports', 'Health'];
+            categories.forEach(category => {
+                const tab = document.createElement('button');
+                tab.className = 'px-4 py-2 rounded-full bg-gray-200 hover:bg-gray-300';
+                tab.textContent = category;
+                tab.onclick = () => fetchNews(category.toLowerCase());
+                categoryTabsContainer.appendChild(tab);
+            });
+        }
+        
+        function showLoader() {
+            loader.style.display = 'block';
+            errorMessage.style.display = 'none';
+            articleList.innerHTML = '';
+        }
+
+        function showError(message) {
+            loader.style.display = 'none';
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            articleList.innerHTML = '';
+        }
+
+        // --- Modal Handling ---
+
+        function openDetailModal(article) {
+            detailModalContent.innerHTML = `
+                <h2 class="text-2xl font-bold mb-2">${article.title}</h2>
+                <img src="${article.image || 'https://placehold.co/600x400/e2e8f0/e2e8f0?text=News'}" alt="${article.title}" class="w-full h-64 object-cover rounded-lg mb-4">
+                <p class="text-sm text-gray-500 mb-4">By ${article.author || 'Unknown'} | ${new Date(article.publishedAt).toLocaleDateString()}</p>
+                <p>${article.description}</p>
+                <a href="${article.url}" target="_blank" class="text-blue-500 hover:underline mt-4 inline-block">Read Full Article</a>
+            `;
+            currentArticleForSummary = article;
+            detailModal.classList.add('active');
+        }
+
+        function closeDetailModal() {
+            detailModal.classList.remove('active');
+        }
+
+        function openSummaryModal() {
+            summaryModal.classList.add('active');
+            fetchSummary(currentArticleForSummary);
+        }
+
+        function closeSummaryModal() {
+            summaryModal.classList.remove('active');
+        }
+
+        summarizeButton.onclick = () => {
+            closeDetailModal();
+            openSummaryModal();
+        };
+
+        // --- Initial Load ---
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            renderCategoryTabs();
+            fetchNews();
+        });
+
+    </script>
+</body>
+</html>
